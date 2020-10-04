@@ -28,6 +28,26 @@ impl<R: RNG> RandomGen<R> for char {
 	}
 }
 
+/*
+static inline uint64_t random_bounded_nearlydivisionless64(uint64_t range) {
+  __uint128_t random64bit, multiresult;
+  uint64_t leftover;
+  uint64_t threshold;
+  random64bit = RandomBitGenerator();
+  multiresult = random64bit * range;
+  leftover = (uint64_t)multiresult;
+  if (leftover < range) {
+	threshold = -range % range;
+	while (leftover < threshold) {
+	  random64bit = RandomBitGenerator();
+	  multiresult = random64bit * range;
+	  leftover = (uint64_t)multiresult;
+	}
+  }
+  return multiresult >> 64; // [0, range)
+}
+ */
+
 /// Boilerplate code for creating a RandomGen implementation for number types.  
 /// Uses Lemire's debiased integer multiplication method.
 macro_rules! randomgen_number {
@@ -44,15 +64,24 @@ macro_rules! randomgen_number {
 
             impl<R: RNG> RandomRange<R> for $unsigned {
                 fn random_range(r: &mut R, lower: $unsigned, upper: $unsigned) -> Self {
-                    let t = ((-(upper as $signed)) % (upper as $signed)) as $unsigned;
-                    let in_range = loop {
-                        let x = Self::random(r);
-                        let m = (x as $bigger_unsigned).wrapping_mul(upper as $bigger_unsigned);
-                        if (m as $unsigned) >= t {
-                            break (m >> (::core::mem::size_of::<$unsigned>() * 8)) as $unsigned;
+                    const BIT_SIZE: usize = core::mem::size_of::<$unsigned>() * 8;
+                    let mut random_bigger: $bigger_unsigned = r.generate();
+                    let mut multiresult: $bigger_unsigned = random_bigger * (upper as $bigger_unsigned);
+                    let threshold: $unsigned;
+                    let mut leftover = multiresult as $unsigned;
+                    if leftover < upper {
+                        threshold = (-(upper as $signed) % (upper as $signed)) as $unsigned;
+                        while leftover < threshold {
+                            random_bigger = r.generate();
+                            multiresult = random_bigger * (upper as $bigger_unsigned);
+                            leftover = multiresult as $unsigned;
                         }
-                    };
-                    in_range.max(lower)
+                    }
+                    if BIT_SIZE == core::mem::size_of::<$bigger_unsigned>() {
+                        (multiresult as $unsigned).max(lower)
+                    } else {
+                        ((multiresult >> BIT_SIZE) as $unsigned).max(lower)
+                    }
                 }
             }
 
@@ -67,15 +96,24 @@ macro_rules! randomgen_number {
 
             impl<R: RNG> RandomRange<R> for $signed {
                 fn random_range(r: &mut R, lower: $signed, upper: $signed) -> Self {
-                    let t = ((-(upper as $signed)) % (upper as $signed));
-                    let in_range = loop {
-                        let x = Self::random(r);
-                        let m = (x as $bigger_signed).wrapping_mul(upper as $bigger_signed);
-                        if (m as $signed) >= t {
-                            break (m >> (::core::mem::size_of::<$signed>() * 8)) as $signed;
+                    const BIT_SIZE: usize = core::mem::size_of::<$signed>() * 8;
+                    let mut random_bigger: $bigger_signed = r.generate();
+                    let mut multiresult: $bigger_signed = random_bigger * (upper as $bigger_signed);
+                    let threshold: $signed;
+                    let mut leftover = multiresult as $signed;
+                    if leftover < upper {
+                        threshold = -(upper as $signed) % (upper as $signed);
+                        while leftover < threshold {
+                            random_bigger = r.generate();
+                            multiresult = random_bigger * (upper as $bigger_signed);
+                            leftover = multiresult as $signed;
                         }
-                    };
-                    in_range.max(lower)
+                    }
+                    if BIT_SIZE == core::mem::size_of::<$bigger_signed>() {
+                        (multiresult as $signed).max(lower)
+                    } else {
+                        ((multiresult >> BIT_SIZE) as $signed).max(lower)
+                    }
                 }
             }
         )*
